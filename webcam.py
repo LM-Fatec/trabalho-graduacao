@@ -1,14 +1,23 @@
 # Importando as Bibliotecas
 from PIL import ImageFont, ImageDraw, Image
-from cv2 import threshold
-from easyocr import Reader
 import numpy as np
+from matplotlib import pyplot as plt
+from gtts import gTTS
+import easyocr
 import cv2
- 
-lista_idiomas = "pt"
-idiomas = lista_idiomas.split(",")
-fonte = 'Keyboard.ttf'
-camera = cv2.VideoCapture(0)
+from playsound import playsound
+import pyodbc
+from datetime import datetime
+
+server = "localhost,1433"
+database = "FatecDB"
+username = "sa"
+password = "pwt945jau6"
+
+# conn = pyodbc.connect('DRIVER={ODBC Driver 18 for SQL Server};SERVER='+server+';DATABASE='+database+';ENCRYPT=yes;TrustServerCertificate=yes;UID='+username+';PWD='+ password)
+# cursor = conn.cursor()
+
+fonte = 'Arial.ttf'
  
 cor_fonte = (0,0,0)
 cor_fundo = (200,255,0)
@@ -29,7 +38,7 @@ def desenha_caixa(img, te,bd, cor_caixa=(200,255,0), espessura=2):
  
 def escreve_texto(texto, x, y, img, fonte, cor=(50, 50, 255), tamanho=22):
        fonte = ImageFont.truetype(fonte, tamanho)
-       img_pil = Image.fromarray(img)
+       img_pil = Image.fromarray(img) 
        draw = ImageDraw.Draw(img_pil)
        draw.text((x, y-tamanho), texto, font = fonte, fill = cor)
        img = np.array(img_pil)
@@ -42,30 +51,51 @@ def fundo_texto(texto, x, y, img, fonte, tamanho=32, cor_fundo=(200, 255, 0)):
        fx,fy,fw,fh = cv2.boundingRect(texto_fundo[:,:,2])
        cv2.rectangle(img, (fx, fy), (fx + fw, fy + fh), cor_fundo, -1)
        return img
- 
-if camera.isOpened():
-   while True:
-       conectado, frame = camera.read()
- 
-       if not conectado:
-           break
-       else:
-           cv2.imshow("Vídeo da Webcam", frame)
-          
-           key = cv2.waitKey(32)
- 
-           if key == 27:
-               camera.release()
-               cv2.destroyAllWindows()
-               break
- 
-           if key == 32:
-               reader = Reader(idiomas)
-               resultados = reader.readtext(frame)
-               for(caixa, texto, prob) in resultados:
-                       if prob >= 0.6:
-                               te, td, bd, be = coord_caixa(caixa)
-                               frame = desenha_caixa(frame, te, bd)
-                               frame = fundo_texto(texto, te[0], te[1], frame, fonte, tam_fonte, cor_fundo)
-                               frame = escreve_texto(texto, te[0], te[1], frame, fonte, cor_fonte, tam_fonte)
-               cv2.imwrite("images/teste.jpeg", frame)
+
+
+# 0 Utiliza a camera do notebook, 1 Utiliza a camera do celular
+video = cv2.VideoCapture(1)
+
+while True:
+    check, frame = video.read()
+    
+    # Redimensiona o tamanho do frame para um tamanho padrão
+    frame = cv2.resize(frame, (640, 480))
+    
+    # Utiliza a biblioteca EasyOCR para identificar os textos no frame
+    reader = easyocr.Reader(['pt'], gpu=False)
+    imagem_cp = frame.copy()
+    result = reader.readtext(frame)
+
+    agora = datetime.now()
+    data = agora.strftime("%H:%M:%S")
+
+    # Salva o frame original
+    cv2.imwrite("images/original/captura-" + data +".jpeg", frame)
+    alergenicos = ["CONTÉM GLUTÉN", "NÃO CONTÉM GLÚTEN"]
+    alergenicos = [each_string.lower() for each_string in alergenicos]
+    for(caixa, texto, prob) in result:
+        probabilidade = 0.5 # Número de referência para confiança
+        if prob >= probabilidade:
+
+            # Realiza o quadro em volta do texto identificado
+            te, td, bd, be = coord_caixa(caixa)
+            textoFormatado = f'{texto} - {str(round(prob, 2) * 100)}%'
+            if any(texto.lower() in ele for ele in alergenicos):
+                frame = desenha_caixa(frame, te, bd)
+                frame = fundo_texto(textoFormatado, te[0], te[1], frame, fonte, tam_fonte, cor_fundo)
+                frame = escreve_texto(textoFormatado, te[0], te[1], frame, fonte, cor_fonte, tam_fonte)        
+
+                # Salva a imagem capturada
+                cv2.imwrite("images/captura-" + data + ".jpeg", frame)
+
+                # Utiliza do Google Translate para ditar oque foi encontrado na imagem
+                tts = gTTS(texto, lang='pt', tld='com.br')
+                tts.save("sounds/sound-" + data + ".mp3")
+                playsound("sounds/sound-" + data + ".mp3")
+    cv2.imshow("OCR", frame)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+       video.release()
+       cv2.destroyAllWindows()
+       break
